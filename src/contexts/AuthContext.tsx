@@ -1,90 +1,98 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { User } from '../types';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useUser, useClerk } from '@clerk/clerk-react';
+import type { User, AppUser, ClerkUserData } from '../types';
 
 interface AuthContextType {
-  user: User | null;
+  user: AppUser | null;
   isLoading: boolean;
-  login: (code: string) => Promise<void>;
+  // Remove login since Clerk handles this
   logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+const mapClerkUser = (clerkUser: ClerkUserData): AppUser => {
+  return {
+    id: clerkUser.id,
+    preferences: {
+      theme: 'system',
+      notifications: true
+    },
+    lastActiveAt: Date.now(),
+    dialogHistory: [],
+    clerkData: {
+      id: clerkUser.id,
+      firstName: clerkUser.firstName,
+      lastName: clerkUser.lastName,
+      imageUrl: clerkUser.imageUrl,
+      emailAddresses: clerkUser.emailAddresses
+    }
+  };
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const { isLoaded: clerkLoaded, user: clerkUser } = useUser();
+  const { signOut } = useClerk();
+  const [user, setUser] = useState<AppUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    checkAuth();
-  }, []);
+    const initializeUser = async () => {
+      if (!clerkLoaded) {
+        return;
+      }
 
-  const checkAuth = async () => {
-    try {
-      const token = localStorage.getItem('auth_token');
-      if (token) {
-        const response = await fetch('/api/auth/me', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+      if (!clerkUser) {
+        setUser(null);
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        // Map Clerk user data to our app's user format
+        const userData = mapClerkUser({
+          id: clerkUser.id,
+          firstName: clerkUser.firstName,
+          lastName: clerkUser.lastName,
+          imageUrl: clerkUser.imageUrl,
+          emailAddresses: clerkUser.emailAddresses?.map(email => ({
+            emailAddress: email.emailAddress
+          }))
         });
-        if (response.ok) {
-          const userData = await response.json();
-          setUser(userData);
-        } else {
-          localStorage.removeItem('auth_token');
-        }
+
+        // Here you could fetch additional user data from your backend if needed
+        // const response = await fetch('/api/users/profile', {
+        //   headers: {
+        //     'Authorization': `Bearer ${await clerkUser.getToken()}`
+        //   }
+        // });
+        // const additionalData = await response.json();
+        // userData.preferences = additionalData.preferences;
+
+        setUser(userData);
+      } catch (error) {
+        console.error('Failed to initialize user:', error);
+        setUser(null);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error('Auth check failed:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
 
-  const login = async (code: string) => {
-    setIsLoading(true);
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ code })
-      });
-
-      if (!response.ok) {
-        throw new Error('Login failed');
-      }
-
-      const { user: userData, token } = await response.json();
-      localStorage.setItem('auth_token', token);
-      setUser(userData);
-    } catch (error) {
-      console.error('Login failed:', error);
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    initializeUser();
+  }, [clerkUser, clerkLoaded]);
 
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-        }
-      });
+      await signOut();
+      setUser(null);
     } catch (error) {
       console.error('Logout failed:', error);
-    } finally {
-      localStorage.removeItem('auth_token');
-      setUser(null);
+      throw error;
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, logout }}>
       {children}
     </AuthContext.Provider>
   );

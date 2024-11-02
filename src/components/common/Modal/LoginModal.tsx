@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '/Users/wenjiaqi/Downloads/good_things/src/contexts/AuthContext.tsx';
 
 interface LoginModalProps {
   isOpen: boolean;
